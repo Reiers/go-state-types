@@ -57,57 +57,57 @@ var DealWeightMultiplier = big.NewInt(10)
 // Quality multiplier for verified deals in a sector
 var VerifiedDealWeightMultiplier = big.NewInt(100)
 
-// FIP-XXXX Daybreak: Transition parameters for the Verified Deal Weight Multiplier (VDWM).
-// The VDWM transitions linearly from VerifiedDealWeightMultiplier (100, i.e. 10x) to
-// QualityBaseMultiplier (10, i.e. 1x) over DaybreakTransitionEpochs epochs, starting
-// at DaybreakStartEpoch.
-//
-// These values are set during the Daybreak network upgrade migration. They default to
-// zero (transition not active) until the upgrade occurs.
+// FIP-XXXX Daybreak: VDWM transition constants.
+// Code values: VerifiedDealWeightMultiplier = 100 (10x), QualityBaseMultiplier = 10 (1x).
+// The transition linearly interpolates from 100 to 10 over a configurable number of epochs.
 
-// DaybreakTransitionEpochs is the number of epochs over which the VDWM transition occurs.
-// Set to 1,051,200 (≈12 months) for mainnet. Set during migration.
-var DaybreakTransitionEpochs int64 = 0
-
-// DaybreakStartEpoch is the epoch at which the VDWM transition begins.
-// Set to the Daybreak upgrade height during migration. Zero means transition not active.
-var DaybreakStartEpoch int64 = 0
+const (
+	// DaybreakVDWMStart is the initial code value (10x multiplier)
+	DaybreakVDWMStart = int64(100)
+	// DaybreakVDWMEnd is the final code value (1x multiplier, equal to QualityBaseMultiplier)
+	DaybreakVDWMEnd = int64(10)
+	// DaybreakVDWMDelta is the total change in code value
+	DaybreakVDWMDelta = DaybreakVDWMStart - DaybreakVDWMEnd // 90
+)
 
 // VerifiedDealWeightMultiplierAt returns the VDWM at the given epoch, accounting for the
-// Daybreak linear transition. Before the transition starts, returns VerifiedDealWeightMultiplier (100).
-// After the transition ends, returns QualityBaseMultiplier (10).
-// During the transition, linearly interpolates between the two.
+// Daybreak linear transition.
+//
+// Parameters:
+//   - currentEpoch: the epoch at which to evaluate the multiplier
+//   - daybreakStartEpoch: the epoch when the transition begins (the upgrade height)
+//   - transitionEpochs: duration of the transition in epochs (e.g. 1,051,200 for 12 months)
+//
+// Returns VerifiedDealWeightMultiplier (100) before the transition starts,
+// QualityBaseMultiplier (10) after it ends, and a linearly interpolated value during.
+//
+// If transitionEpochs <= 0, returns the static VerifiedDealWeightMultiplier (no transition).
 //
 // Formula: multiplier = 100 - (90 * progress / transitionEpochs)
 //
-//	where progress = clamp(currentEpoch - startEpoch, 0, transitionEpochs)
-func VerifiedDealWeightMultiplierAt(currentEpoch int64) big.Int {
-	// If transition not configured (pre-Daybreak), return the static multiplier
-	if DaybreakStartEpoch == 0 || DaybreakTransitionEpochs == 0 {
-		return VerifiedDealWeightMultiplier
+//	where progress = clamp(currentEpoch - daybreakStartEpoch, 0, transitionEpochs)
+func VerifiedDealWeightMultiplierAt(currentEpoch, daybreakStartEpoch, transitionEpochs int64) big.Int {
+	// No transition configured
+	if transitionEpochs <= 0 {
+		return big.NewInt(DaybreakVDWMStart)
 	}
 
-	progress := currentEpoch - DaybreakStartEpoch
+	progress := currentEpoch - daybreakStartEpoch
 
 	// Before transition: full 10x (code value 100)
 	if progress <= 0 {
-		return VerifiedDealWeightMultiplier
+		return big.NewInt(DaybreakVDWMStart)
 	}
 
-	// After transition: 1x (code value 10), same as QualityBaseMultiplier
-	if progress >= DaybreakTransitionEpochs {
-		return QualityBaseMultiplier
+	// After transition: 1x (code value 10)
+	if progress >= transitionEpochs {
+		return big.NewInt(DaybreakVDWMEnd)
 	}
 
 	// During transition: linear interpolation
 	// multiplier = 100 - (90 * progress / transitionEpochs)
-	// Using integer arithmetic: (100 * transitionEpochs - 90 * progress) / transitionEpochs
-	startVal := int64(100) // VerifiedDealWeightMultiplier code value
-	endVal := int64(10)    // QualityBaseMultiplier code value
-	delta := startVal - endVal
-
-	numerator := startVal*DaybreakTransitionEpochs - delta*progress
-	result := numerator / DaybreakTransitionEpochs
+	numerator := DaybreakVDWMStart*transitionEpochs - DaybreakVDWMDelta*progress
+	result := numerator / transitionEpochs
 
 	return big.NewInt(result)
 }

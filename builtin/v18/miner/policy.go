@@ -184,9 +184,13 @@ func QualityForWeight(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeig
 // linearly from 10x to 1x. This function should be used for all post-Daybreak
 // quality calculations.
 //
+// Parameters daybreakStartEpoch and transitionEpochs define the transition window.
+// Pass transitionEpochs <= 0 to disable the transition (returns static 10x).
+//
 // FIP-XXXX Daybreak: Restore Equal Sector Quality
-func QualityForWeightAtEpoch(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeight abi.DealWeight, currentEpoch abi.ChainEpoch) abi.SectorQuality {
-	multiplier := builtin.VerifiedDealWeightMultiplierAt(int64(currentEpoch))
+func QualityForWeightAtEpoch(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeight abi.DealWeight,
+	currentEpoch abi.ChainEpoch, daybreakStartEpoch, transitionEpochs int64) abi.SectorQuality {
+	multiplier := builtin.VerifiedDealWeightMultiplierAt(int64(currentEpoch), daybreakStartEpoch, transitionEpochs)
 	return qualityForWeightWithMultiplier(size, duration, verifiedWeight, multiplier)
 }
 
@@ -219,8 +223,9 @@ func QAPowerForWeight(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeig
 
 // QAPowerForWeightAtEpoch calculates QA power using the epoch-aware VDWM.
 // FIP-XXXX Daybreak: Restore Equal Sector Quality
-func QAPowerForWeightAtEpoch(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeight abi.DealWeight, currentEpoch abi.ChainEpoch) abi.StoragePower {
-	quality := QualityForWeightAtEpoch(size, duration, verifiedWeight, currentEpoch)
+func QAPowerForWeightAtEpoch(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeight abi.DealWeight,
+	currentEpoch abi.ChainEpoch, daybreakStartEpoch, transitionEpochs int64) abi.StoragePower {
+	quality := QualityForWeightAtEpoch(size, duration, verifiedWeight, currentEpoch, daybreakStartEpoch, transitionEpochs)
 	return big.Rsh(big.Mul(big.NewIntUnsigned(uint64(size)), quality), builtin.SectorQualityPrecision)
 }
 
@@ -232,9 +237,10 @@ func QAPowerForSector(size abi.SectorSize, sector *SectorOnChainInfo) abi.Storag
 
 // QAPowerForSectorAtEpoch returns QA power accounting for the Daybreak VDWM transition.
 // FIP-XXXX Daybreak: Restore Equal Sector Quality
-func QAPowerForSectorAtEpoch(size abi.SectorSize, sector *SectorOnChainInfo, currentEpoch abi.ChainEpoch) abi.StoragePower {
+func QAPowerForSectorAtEpoch(size abi.SectorSize, sector *SectorOnChainInfo,
+	currentEpoch abi.ChainEpoch, daybreakStartEpoch, transitionEpochs int64) abi.StoragePower {
 	duration := sector.Expiration - sector.PowerBaseEpoch
-	return QAPowerForWeightAtEpoch(size, duration, sector.VerifiedDealWeight, currentEpoch)
+	return QAPowerForWeightAtEpoch(size, duration, sector.VerifiedDealWeight, currentEpoch, daybreakStartEpoch, transitionEpochs)
 }
 
 const MaxAggregatedSectors = 819
@@ -259,8 +265,8 @@ func QAPowerMax(size abi.SectorSize) abi.StoragePower {
 // QAPowerMaxAtEpoch returns maximum achievable QA power at the given epoch,
 // accounting for the Daybreak VDWM transition.
 // FIP-XXXX Daybreak: Restore Equal Sector Quality
-func QAPowerMaxAtEpoch(size abi.SectorSize, currentEpoch abi.ChainEpoch) abi.StoragePower {
-	multiplier := builtin.VerifiedDealWeightMultiplierAt(int64(currentEpoch))
+func QAPowerMaxAtEpoch(size abi.SectorSize, currentEpoch abi.ChainEpoch, daybreakStartEpoch, transitionEpochs int64) abi.StoragePower {
+	multiplier := builtin.VerifiedDealWeightMultiplierAt(int64(currentEpoch), daybreakStartEpoch, transitionEpochs)
 	return big.Div(
 		big.Mul(big.NewInt(int64(size)), multiplier),
 		builtin.QualityBaseMultiplier)

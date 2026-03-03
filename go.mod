@@ -1,6 +1,8 @@
 module github.com/filecoin-project/go-state-types
 
-go 1.24
+go 1.24.0
+
+toolchain go1.24.7
 
 retract v0.12.7 // wrongfully skipped a patch version, use v0.12.6 or v0.12.8&^
 
