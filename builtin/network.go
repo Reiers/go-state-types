@@ -57,6 +57,61 @@ var DealWeightMultiplier = big.NewInt(10)
 // Quality multiplier for verified deals in a sector
 var VerifiedDealWeightMultiplier = big.NewInt(100)
 
+// FIP-XXXX Daybreak: Transition parameters for the Verified Deal Weight Multiplier (VDWM).
+// The VDWM transitions linearly from VerifiedDealWeightMultiplier (100, i.e. 10x) to
+// QualityBaseMultiplier (10, i.e. 1x) over DaybreakTransitionEpochs epochs, starting
+// at DaybreakStartEpoch.
+//
+// These values are set during the Daybreak network upgrade migration. They default to
+// zero (transition not active) until the upgrade occurs.
+
+// DaybreakTransitionEpochs is the number of epochs over which the VDWM transition occurs.
+// Set to 1,051,200 (≈12 months) for mainnet. Set during migration.
+var DaybreakTransitionEpochs int64 = 0
+
+// DaybreakStartEpoch is the epoch at which the VDWM transition begins.
+// Set to the Daybreak upgrade height during migration. Zero means transition not active.
+var DaybreakStartEpoch int64 = 0
+
+// VerifiedDealWeightMultiplierAt returns the VDWM at the given epoch, accounting for the
+// Daybreak linear transition. Before the transition starts, returns VerifiedDealWeightMultiplier (100).
+// After the transition ends, returns QualityBaseMultiplier (10).
+// During the transition, linearly interpolates between the two.
+//
+// Formula: multiplier = 100 - (90 * progress / transitionEpochs)
+//
+//	where progress = clamp(currentEpoch - startEpoch, 0, transitionEpochs)
+func VerifiedDealWeightMultiplierAt(currentEpoch int64) big.Int {
+	// If transition not configured (pre-Daybreak), return the static multiplier
+	if DaybreakStartEpoch == 0 || DaybreakTransitionEpochs == 0 {
+		return VerifiedDealWeightMultiplier
+	}
+
+	progress := currentEpoch - DaybreakStartEpoch
+
+	// Before transition: full 10x (code value 100)
+	if progress <= 0 {
+		return VerifiedDealWeightMultiplier
+	}
+
+	// After transition: 1x (code value 10), same as QualityBaseMultiplier
+	if progress >= DaybreakTransitionEpochs {
+		return QualityBaseMultiplier
+	}
+
+	// During transition: linear interpolation
+	// multiplier = 100 - (90 * progress / transitionEpochs)
+	// Using integer arithmetic: (100 * transitionEpochs - 90 * progress) / transitionEpochs
+	startVal := int64(100) // VerifiedDealWeightMultiplier code value
+	endVal := int64(10)    // QualityBaseMultiplier code value
+	delta := startVal - endVal
+
+	numerator := startVal*DaybreakTransitionEpochs - delta*progress
+	result := numerator / DaybreakTransitionEpochs
+
+	return big.NewInt(result)
+}
+
 // Precision used for making QA power calculations
 const SectorQualityPrecision = 20
 

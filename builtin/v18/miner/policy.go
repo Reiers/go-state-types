@@ -172,15 +172,35 @@ const DailyFeeBlockRewardCapDenom = 2
 // Sectors full of VerifiedDeals will have a BigInt of VerifiedDealWeightMultiplier/QualityBaseMultiplier.
 // Sectors without VerifiedDeals will have a BigInt of QualityBaseMultiplier/QualityBaseMultiplier.
 // BigInt of a sector is a weighted average of multipliers based on their proportions.
+//
+// NOTE: This is the legacy static version. For Daybreak-aware quality calculation,
+// use QualityForWeightAtEpoch which accounts for the VDWM transition.
 func QualityForWeight(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeight abi.DealWeight) abi.SectorQuality {
+	return qualityForWeightWithMultiplier(size, duration, verifiedWeight, builtin.VerifiedDealWeightMultiplier)
+}
+
+// QualityForWeightAtEpoch calculates sector quality using the epoch-aware VDWM.
+// During the Daybreak transition, the verified deal weight multiplier decreases
+// linearly from 10x to 1x. This function should be used for all post-Daybreak
+// quality calculations.
+//
+// FIP-XXXX Daybreak: Restore Equal Sector Quality
+func QualityForWeightAtEpoch(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeight abi.DealWeight, currentEpoch abi.ChainEpoch) abi.SectorQuality {
+	multiplier := builtin.VerifiedDealWeightMultiplierAt(int64(currentEpoch))
+	return qualityForWeightWithMultiplier(size, duration, verifiedWeight, multiplier)
+}
+
+// qualityForWeightWithMultiplier is the shared implementation for quality calculation
+// with a given verified deal weight multiplier.
+func qualityForWeightWithMultiplier(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeight abi.DealWeight, vdwMultiplier big.Int) abi.SectorQuality {
 	// sectorSpaceTime = size * duration
 	sectorSpaceTime := big.Mul(big.NewIntUnsigned(uint64(size)), big.NewInt(int64(duration)))
 	// Base - all size * duration of non-verified deals
 	// weightedBaseSpaceTime = (sectorSpaceTime - verifiedWeight) * QualityBaseMultiplier
 	weightedBaseSpaceTime := big.Mul(big.Sub(sectorSpaceTime, verifiedWeight), builtin.QualityBaseMultiplier)
-	// Verified - all verified deal size * verified deal duration * 100
-	// weightedVerifiedSpaceTime = verifiedWeight * VerifiedDealWeightMultiplier
-	weightedVerifiedSpaceTime := big.Mul(verifiedWeight, builtin.VerifiedDealWeightMultiplier)
+	// Verified - all verified deal size * verified deal duration * multiplier
+	// weightedVerifiedSpaceTime = verifiedWeight * vdwMultiplier
+	weightedVerifiedSpaceTime := big.Mul(verifiedWeight, vdwMultiplier)
 	// Sum - sum of all spacetime
 	// weightedSumSpaceTime = weightedBaseSpaceTime + weightedVerifiedSpaceTime
 	weightedSumSpaceTime := big.Sum(weightedBaseSpaceTime, weightedVerifiedSpaceTime)
@@ -197,10 +217,24 @@ func QAPowerForWeight(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeig
 	return big.Rsh(big.Mul(big.NewIntUnsigned(uint64(size)), quality), builtin.SectorQualityPrecision)
 }
 
+// QAPowerForWeightAtEpoch calculates QA power using the epoch-aware VDWM.
+// FIP-XXXX Daybreak: Restore Equal Sector Quality
+func QAPowerForWeightAtEpoch(size abi.SectorSize, duration abi.ChainEpoch, verifiedWeight abi.DealWeight, currentEpoch abi.ChainEpoch) abi.StoragePower {
+	quality := QualityForWeightAtEpoch(size, duration, verifiedWeight, currentEpoch)
+	return big.Rsh(big.Mul(big.NewIntUnsigned(uint64(size)), quality), builtin.SectorQualityPrecision)
+}
+
 // The quality-adjusted power for a sector.
 func QAPowerForSector(size abi.SectorSize, sector *SectorOnChainInfo) abi.StoragePower {
 	duration := sector.Expiration - sector.PowerBaseEpoch
 	return QAPowerForWeight(size, duration, sector.VerifiedDealWeight)
+}
+
+// QAPowerForSectorAtEpoch returns QA power accounting for the Daybreak VDWM transition.
+// FIP-XXXX Daybreak: Restore Equal Sector Quality
+func QAPowerForSectorAtEpoch(size abi.SectorSize, sector *SectorOnChainInfo, currentEpoch abi.ChainEpoch) abi.StoragePower {
+	duration := sector.Expiration - sector.PowerBaseEpoch
+	return QAPowerForWeightAtEpoch(size, duration, sector.VerifiedDealWeight, currentEpoch)
 }
 
 const MaxAggregatedSectors = 819
@@ -215,10 +249,20 @@ type VestSpec struct {
 	Quantization abi.ChainEpoch // Maximum precision of vesting table (limits cardinality of table).
 }
 
-// Returns maximum achievable QA power.
+// Returns maximum achievable QA power (using static 10x multiplier).
 func QAPowerMax(size abi.SectorSize) abi.StoragePower {
 	return big.Div(
 		big.Mul(big.NewInt(int64(size)), builtin.VerifiedDealWeightMultiplier),
+		builtin.QualityBaseMultiplier)
+}
+
+// QAPowerMaxAtEpoch returns maximum achievable QA power at the given epoch,
+// accounting for the Daybreak VDWM transition.
+// FIP-XXXX Daybreak: Restore Equal Sector Quality
+func QAPowerMaxAtEpoch(size abi.SectorSize, currentEpoch abi.ChainEpoch) abi.StoragePower {
+	multiplier := builtin.VerifiedDealWeightMultiplierAt(int64(currentEpoch))
+	return big.Div(
+		big.Mul(big.NewInt(int64(size)), multiplier),
 		builtin.QualityBaseMultiplier)
 }
 
